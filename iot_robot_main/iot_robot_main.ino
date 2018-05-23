@@ -24,6 +24,8 @@
 // Over the Air (OTA) updating
 #include <ArduinoOTA.h>
 
+//  MQTT Interface
+#include <PubSubClient.h>
 
 //
 // Configuration Data
@@ -40,6 +42,14 @@ WiFiClient wifiClient;
 
 // Real Time Clock
 RTC_DS1307 rtc;
+
+// MQTT configurationPubSubClient client(espClient);
+// dependency on Wifi
+PubSubClient mqttClient(wifiClient);
+const char* mqttServer = "10.0.0.28";
+const int mqttPort = 1883;
+const char* mqttUser = "blpete";
+const char* mqttPassword = "Peterson2016!";
 
 // One time setup 
 void setup()
@@ -61,6 +71,9 @@ void setup()
     // startup OTA
     startupOTA();
 
+    // startup MQTT
+    startupMQTT();
+
     // Configure Device
     logMessage("Device Initialized:"+ DEVICE_ID);
 }
@@ -75,7 +88,10 @@ void loop()
     // OTA update loop
     ArduinoOTA.handle();
 
-    delay(5000);
+    // MQTT loop
+    mqttClient.loop();
+
+    delay(2000);
 }
 
 
@@ -290,3 +306,52 @@ void startupOTA() {
   });
   ArduinoOTA.begin();
   }
+
+
+void startupMQTT() {
+    // setup mqtt
+  mqttClient.setServer(mqttServer, mqttPort);
+ 
+  while (!mqttClient.connected()) {
+      Serial.println("Connecting to MQTT...");
+   
+      if (mqttClient.connect("ESP32Client", mqttUser, mqttPassword )) {
+        logMessage("MQTT connected");
+      } else {
+        logMessage("MQTT failed with state:");
+        Serial.print(mqttClient.state());
+        delay(2000);
+   
+      }
+  }
+  mqttClient.publish("esp/test", "Hello from ESP32");
+  mqttClient.subscribe("esp/msg");
+  mqttClient.setCallback(mqttCallback);
+}
+
+
+
+void mqttCallback(char* topic, byte* payload, unsigned int length) {
+  
+    logMessage("MQTT Message arrived [");
+    Serial.print(topic);
+    Serial.print("] ");
+    for (int i = 0; i < length; i++) {
+      Serial.print((char)payload[i]);
+    }
+    Serial.println();
+    const char * stupid ="stupid";
+    mqttClient.publish("esp/test", stupid);
+    Serial.print("Msg:");
+    Serial.print(stupid);
+
+  // // Switch on the LED if an 1 was received as first character
+  // if ((char)payload[0] == '1') {
+  //   digitalWrite(BUILTIN_LED, LOW);   // Turn the LED on (Note that LOW is the voltage level
+  //   // but actually the LED is on; this is because
+  //   // it is acive low on the ESP-01)
+  // } else {
+  //   digitalWrite(BUILTIN_LED, HIGH);  // Turn the LED off by making the voltage HIGH
+  // }
+
+}

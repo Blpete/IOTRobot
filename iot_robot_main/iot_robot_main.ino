@@ -1,4 +1,3 @@
-
 /*
     Master IOT ROBOT sketch for ESP8266
     Barry peterson
@@ -19,13 +18,17 @@
 //#include <WiFiServer.h>
 
 // Real Time Clock (RTC)
-#include <RTC_DS1307.h>
+//#include <RTC_DS1307.h>
 
 // Over the Air (OTA) updating
 #include <ArduinoOTA.h>
 
 //  MQTT Interface
 #include <PubSubClient.h>
+
+
+#include <LiquidCrystal_I2C.h> //This library you can add via Include Library > Manage Library > 
+
 
 //
 // Configuration Data
@@ -36,12 +39,12 @@
 
 // Wifi Settings
 char ssid[] = "iotlink";     //  your network SSID (name)
-char pass[] = "peterson1";  // your network password
+char pass[] = "2603380139!"; //"peterson1";  // your network password
 int wifiStatus = WL_IDLE_STATUS;     // the Wifi radio's status
 WiFiClient wifiClient;
 
 // Real Time Clock
-RTC_DS1307 rtc;
+//RTC_DS1307 rtc;
 
 // MQTT configurationPubSubClient client(espClient);
 // dependency on Wifi
@@ -50,6 +53,10 @@ const char* mqttServer = "10.0.0.28";
 const int mqttPort = 1883;
 const char* mqttUser = "blpete";
 const char* mqttPassword = "Peterson2016!";
+const char* nodeName ="ESP8266-1";
+boolean mqttInitialized= false;
+
+LiquidCrystal_I2C lcd(0x3F, 16, 2);
 
 // One time setup 
 void setup()
@@ -76,6 +83,13 @@ void setup()
 
     // Configure Device
     logMessage("Device Initialized:"+ DEVICE_ID);
+lcd.begin(16,2);
+    lcd.init();   // initializing the LCD
+  lcd.backlight(); // Enable or Turn On the backlight 
+  lcd.setCursor(0, 1);
+  lcd.print("14CORE | 16x2 LCD TEST"); // Start Print text to Line 1
+  lcd.setCursor(0, 2);      
+  lcd.print("-----------------------"); // Start Print Test to Line 2
 }
  
 // Main Looop 
@@ -83,7 +97,7 @@ void loop()
 {
     scanI2CBus();
 
-    logRealTimeClock();
+ //   logRealTimeClock();
 
     // OTA update loop
     ArduinoOTA.handle();
@@ -98,6 +112,9 @@ void loop()
 // Common Utilities
 void logMessage(char* msg){
     Serial.println(msg);
+    if (mqttInitialized) {
+      mqttClient.publish("esp/log", msg);
+    }
 }
 
 void logPrint(char* msg) {
@@ -233,12 +250,12 @@ void setRealTimeClock(){
    logMessage("RTC is being set!");
     // following line sets the RTC to the date & time this sketch was compiled
     //rtc.adjust(DateTime(__DATE__, __TIME__));
-    rtc.SetTime(00,40,13,1,06,03,17);
+   // rtc.SetTime(00,40,13,1,06,03,17);
 }
 
 void logRealTimeClock () {
-    rtc.DisplayTime();
-    long now = rtc.UnixTimestamp();
+   // rtc.DisplayTime();
+    long now = 0;//rtc.now();
     logMessage("RTC value:");
     Serial.println(now);
 //    Serial.print(now.year(), DEC);
@@ -315,16 +332,18 @@ void startupMQTT() {
   while (!mqttClient.connected()) {
       Serial.println("Connecting to MQTT...");
    
-      if (mqttClient.connect("ESP32Client", mqttUser, mqttPassword )) {
+      if (mqttClient.connect(nodeName,mqttUser, mqttPassword )) {
         logMessage("MQTT connected");
       } else {
         logMessage("MQTT failed with state:");
-        Serial.print(mqttClient.state());
+        Serial.println(mqttClient.state());
         delay(2000);
    
       }
   }
-  mqttClient.publish("esp/test", "Hello from ESP32");
+  mqttInitialized = true;
+  mqttClient.publish("esp/test", "Hello from ESP");
+  
   mqttClient.subscribe("esp/msg");
   mqttClient.setCallback(mqttCallback);
 }
@@ -332,18 +351,52 @@ void startupMQTT() {
 
 
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
+  Serial.print("Message arrived [");
+  Serial.print(topic);
+  Serial.print("] ");
+  for (int i=0;i<length;i++) {
+    Serial.print((char)payload[i]);
+  }
+//  Serial.println();
+//      char cstring[length];
+//      for (int i=0; i<length; i++){
+//        cstring[i]=(char) payload[i];
+//      }
+//  cstring[length] = '\0';    // Adds a terminate terminate to end of string based on length of current payload
+// const char* p_payload = cstring;  
+//  Serial.println(p_payload);   
+//    //String s = String((char*)p_payload);
+
+  payload[length] = '\0'; // Null terminator used to terminate the char array
+  String message = (char*)payload;
+  Serial.println(message);
   
-    logMessage("MQTT Message arrived [");
-    Serial.print(topic);
-    Serial.print("] ");
-    for (int i = 0; i < length; i++) {
-      Serial.print((char)payload[i]);
+    //logMessage(p_payload);
+    //int strcomparison = strcmp(p_payload, "on");
+    if (message=="off") {
+       Serial.println("off");
+        lcd.noBacklight();
+  
+    } //end If 
+    else {
+             Serial.println("on");
+        lcd.backlight();
     }
-    Serial.println();
-    const char * stupid ="stupid";
-    mqttClient.publish("esp/test", stupid);
-    Serial.print("Msg:");
-    Serial.print(stupid);
+    
+                             
+    lcd.clear();
+
+    lcd.setCursor(0,0);
+   lcd.print(message);
+//    Serial.print("] ");
+//    for (int i = 0; i < length; i++) {
+//      Serial.print((char)payload[i]);
+//    }
+//    Serial.println();
+//    const char * stupid ="stupid";
+//    mqttClient.publish("esp/test", stupid);
+//    Serial.print("Msg:");
+//    Serial.print(stupid);
 
   // // Switch on the LED if an 1 was received as first character
   // if ((char)payload[0] == '1') {

@@ -6,7 +6,6 @@
 
 // Wifi
 #include <ESP8266WiFi.h>
-
 // Managing common includes
 // I2C
 #include <Wire.h>
@@ -27,12 +26,16 @@
 
 #include <LiquidCrystal_I2C.h> //This library you can add via Include Library > Manage Library >
 
+#include <EEPROM.h>
+
+
 //
 // Configuration Data
 //
 
 // MicroController ID
-const char *DEVICE_ID = "ESP8266-1";
+int DEVICE_ID = 1;
+char DEVICE[12];
 
 // Wifi Settings
 char ssid[] = "iotlink";         //  your network SSID (name)
@@ -58,6 +61,9 @@ LiquidCrystal_I2C lcd(0x3F, 16, 2);
 // One time setup
 void setup()
 {
+  DEVICE_ID = ESP.getChipId();
+  sprintf(DEVICE,"\t%08X", DEVICE_ID);
+  //const char* DEVICE = String(DEVICE_ID).c_str();
   //Setup Serial Communications
   Serial.begin(115200);
   logMessage("Serial Interface started at 115200 baud");
@@ -80,15 +86,23 @@ void setup()
 
   // Configure Device
   logMessage("Device Initialized:");
-  logMessage(DEVICE_ID);
+  logMessage(DEVICE);
+
+  EEPROM.begin(256);
+  
   lcd.begin(16, 2);
   lcd.init();      // initializing the LCD
   lcd.backlight(); // Enable or Turn On the backlight
   lcd.setCursor(0, 1);
-  lcd.print("14CORE | 16x2 LCD TEST"); // Start Print text to Line 1
+  lcd.print("I'm Alive"); // Start Print text to Line 1
   lcd.setCursor(0, 2);
-  lcd.print("-----------------------"); // Start Print Test to Line 2
- // lcdInitialized = true;
+  lcd.print(DEVICE); // Start Print Test to Line 2
+                                        // lcdInitialized = true;
+                                     
+ // readConfig();
+ 
+                                        
+                                        
 }
 
 // Main Looop
@@ -107,6 +121,7 @@ void loop()
   delay(2000);
 }
 
+
 // Common Utilities
 void logMessage(const char *msg)
 {
@@ -115,12 +130,53 @@ void logMessage(const char *msg)
   {
     mqttClient.publish("esp/log", msg);
   }
+  lcd.setCursor(0, 1);
+  lcd.print(msg);
 }
 
 void logPrint(char *msg)
 {
   Serial.print(msg);
 }
+
+void readConfig() {
+  
+  byte high = EEPROM.read(0); //read the first half
+  byte low = EEPROM.read(1); //read the second half
+  
+  int size = (high << 8) + low; //reconstruct the integer
+
+    char str[80];
+   sprintf(str, "Value of Len = %d", size);
+   logMessage(str);
+   
+  char temp[size];// = new char[size];
+  for (int i=0; i<size; i++) {
+    temp[i] = EEPROM.read(i+2);
+  }
+  temp[size]=0;
+  logMessage("Reading CONFIG from EEPROM");
+  logMessage(temp);
+}
+
+void writeConfig(String config) {
+  int len =  config.length();
+  byte high =len/256;
+  byte low =len- (high*256);
+
+    char str[80];
+   sprintf(str, "Value of Len = %d", low);
+   logMessage(str);
+  
+  EEPROM.write(0, high);
+  EEPROM.write(1,  low);
+  for (int i=0; i<len; i++) {
+    EEPROM.write(i+2,config[i]);
+  }
+  EEPROM.commit();
+  logMessage("wrote config");
+}
+
 
 // I2C common Utilities
 void scanI2CBus()
@@ -193,7 +249,7 @@ void printWifiData()
   IPAddress ip = WiFi.localIP();
   logPrint("IP Address: ");
   Serial.println(ip);
-  lcd.setCursor(0,1);
+  lcd.setCursor(0, 1);
   lcd.print(ip);
   // logMessage(ip);
 
@@ -357,7 +413,8 @@ void startupMQTT()
     }
   }
   mqttInitialized = true;
-  mqttClient.publish("esp/test", "Hello from ESP");
+//    const char* DEVICE = String(DEVICE_ID).c_str();
+  mqttClient.publish("devices", DEVICE);
 
   mqttClient.subscribe("esp/msg");
   mqttClient.setCallback(mqttCallback);
@@ -372,42 +429,41 @@ void mqttCallback(char *topic, byte *payload, unsigned int length)
   {
     Serial.print((char)payload[i]);
   }
-  //  Serial.println();
-  //      char cstring[length];
-  //      for (int i=0; i<length; i++){
-  //        cstring[i]=(char) payload[i];
-  //      }
-  //  cstring[length] = '\0';    // Adds a terminate terminate to end of string based on length of current payload
-  // const char* p_payload = cstring;
-  //  Serial.println(p_payload);
-  //    //String s = String((char*)p_payload);
 
   payload[length] = '\0'; // Null terminator used to terminate the char array
   String message = (char *)payload;
   Serial.println(message);
 
   executeCommand(message);
-
-  lcd.clear();
-  lcd.setCursor(0, 0);
- // lcd.autoscroll();
-  lcd.print(message);
- 
-  //    Serial.print("] ");
-  //    for (int i = 0; i < length; i++) {
-  //      Serial.print((char)payload[i]);
-  //    }
-  //    Serial.println();
-  //    const char * stupid ="stupid";
-  //    mqttClient.publish("esp/test", stupid);
-  //    Serial.print("Msg:");
-  //    Serial.print(stupid);
-
-  // // Switch on the LED if an 1 was received as first character
 }
+
+
+ String getValue(String data, char separator, int index)
+{
+//    int found = 0;
+//    int strIndex[] = { 0, -1 };
+//    int maxIndex = data.length() - 1;
+//
+//    for (int i = 0; i <= maxIndex && found <= index; i++) {
+//        if (data.charAt(i) == separator || i == maxIndex) {
+//            found++;
+//            strIndex[0] = strIndex[1] + 1;
+//            strIndex[1] = (i == maxIndex) ? i+1 : i;
+//        }
+//    }
+//    return found > index ? data.substring(strIndex[0], strIndex[1]) : "";
+    String val ="";
+    int i = data.indexOf(separator);
+    if (i >0) {
+      val = data.substring(i+1);
+    }
+    return val;
+}
+
 
 void executeCommand(String message)
 {
+  String param = getValue(message, '=',0);
   if (message == "lcd-off")
   {
     Serial.println("off");
@@ -417,6 +473,15 @@ void executeCommand(String message)
   {
     Serial.println("on");
     lcd.backlight();
+  } else if (message.startsWith("lcd-write0")) {
+   lcd.setCursor(0, 0);
+    lcd.print(param);
+  }  else if (message.startsWith("lcd-write1")) {
+   lcd.setCursor(0, 1);
+    lcd.print(param);
+  }
+  else if (message == "lcd-clear") {
+    lcd.clear();
   }
   else if (message == "pin1-on")
   {
@@ -426,8 +491,25 @@ void executeCommand(String message)
   {
     digitalWrite(BUILTIN_LED, HIGH); // Turn the LED off by making the voltage HIGH
   }
-  else if (message == "scan")
+  else if (message == "i2c-scan")
   {
     scanI2CBus();
   }
+  else if (message == "wifi-scan")
+  {
+    scanWifiNetworks();
+  } else if (message.startsWith("write-config")) {
+    writeConfig(param);
+  }
+  else if (message == "read-config"){
+    readConfig();
+  }
+  else
+  {
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    // lcd.autoscroll();
+    lcd.print(message);
+  }
+
 }

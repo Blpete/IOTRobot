@@ -1,3 +1,8 @@
+#include <WiFiClient.h>
+#include <WiFiServer.h>
+#include <WiFi.h>
+#include <WiFiUdp.h>
+
 #include <PubSubClient.h>
 
 #include <WiFiClient.h>

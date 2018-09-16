@@ -55,6 +55,7 @@ const char *mqttUser = "blpete";
 const char *mqttPassword = "Peterson2016!";
 const char *nodeName = "ESP8266-1";
 boolean mqttInitialized = false;
+boolean lcdInitialized = false;
 
 LiquidCrystal_I2C lcd(0x3F, 16, 2);
 
@@ -85,18 +86,20 @@ void setup()
   startupMQTT();
 
   // Configure Device
-  logMessage("Device Initialized:");
-  logMessage(DEVICE);
+  startupDevice(DEVICE);
+ 
 
   EEPROM.begin(256);
-  
-  lcd.begin(16, 2);
-  lcd.init();      // initializing the LCD
-  lcd.backlight(); // Enable or Turn On the backlight
-  lcd.setCursor(0, 1);
-  lcd.print("I'm Alive"); // Start Print text to Line 1
-  lcd.setCursor(0, 2);
-  lcd.print(DEVICE); // Start Print Test to Line 2
+
+  if (lcdInitialized) {
+    lcd.begin(16, 2);
+    lcd.init();      // initializing the LCD
+    lcd.backlight(); // Enable or Turn On the backlight
+    lcd.setCursor(0, 1);
+    lcd.print("I'm Alive"); // Start Print text to Line 1
+    lcd.setCursor(0, 2);
+    lcd.print(DEVICE); // Start Print Test to Line 2
+  }
                                         // lcdInitialized = true;
                                      
  // readConfig();
@@ -121,6 +124,12 @@ void loop()
   delay(2000);
 }
 
+void startupDevice(char* device) {
+   logMessage("Device Initialized:");
+  //logMessage(DEVICE);
+  String msg = "VCC="+ESP.getVcc();
+  logMessage(msg.c_str());
+}
 
 // Common Utilities
 void logMessage(const char *msg)
@@ -130,8 +139,10 @@ void logMessage(const char *msg)
   {
     mqttClient.publish("esp/log", msg);
   }
-  lcd.setCursor(0, 1);
-  lcd.print(msg);
+  if (lcdInitialized) {
+    lcd.setCursor(0, 1);
+    lcd.print(msg);
+  }
 }
 
 void logPrint(char *msg)
@@ -506,10 +517,12 @@ void executeCommand(String message)
   }
   else
   {
-    lcd.clear();
-    lcd.setCursor(0, 0);
-    // lcd.autoscroll();
-    lcd.print(message);
+    if (lcdInitialized) {
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      // lcd.autoscroll();
+      lcd.print(message);
+    }
   }
 
 }

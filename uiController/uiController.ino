@@ -8,18 +8,37 @@
 // Wifi
 #include <ESP8266WiFi.h>
 
+
+// Over the Air (OTA) updating
+#include <ArduinoOTA.h>
+
 // Managing common includes
 // I2C
 #include <Wire.h>
+
+//  MQTT Interface
+#include <PubSubClient.h>
 
 // MicroController ID
 #define DEVICE_ID ESP8266-UI
 
 // Wifi Settings
-char ssid[] = "iotlink";     //  your network SSID (name)
-char pass[] = "peterson1";  // your network password
+char ssid[] = "superduperlink ";     //  your network SSID (name)
+char pass[] = "2603380139";  // your network password
 int wifiStatus = WL_IDLE_STATUS;     // the Wifi radio's status
 WiFiClient wifiClient;
+
+
+// MQTT configurationPubSubClient client(espClient);
+// dependency on Wifi
+PubSubClient mqttClient(wifiClient);
+const char *mqttServer = "10.0.0.28";
+const int mqttPort = 1883;
+const char *mqttUser = "blpete";
+const char *mqttPassword = "Peterson2016!";
+const char *nodeName = "ESP8266-1";
+boolean mqttInitialized = false;
+boolean lcdInitialized = false;
 
 // One time setup 
 void setup()
@@ -33,7 +52,6 @@ void loop()
 {
     scanI2CBus();
 
-    logRealTimeClock();
 
     // OTA update loop
     ArduinoOTA.handle();
@@ -43,6 +61,47 @@ void loop()
 
     delay(2000);
 }
+
+// I2C common Utilities
+void scanI2CBus()
+{
+  byte error, address;
+  int nDevices;
+
+  logMessage("Scanning I2C Bus...");
+
+  nDevices = 0;
+  for (address = 1; address < 127; address++)
+  {
+
+    Wire.beginTransmission(address);
+    error = Wire.endTransmission();
+
+    if (error == 0)
+    {
+      logMessage("I2C device found at address 0x");
+      if (address < 16)
+        Serial.print("0");
+      Serial.println(address, HEX);
+      //todo  logPrint(address,HEX);
+      logMessage("  !");
+
+      nDevices++;
+    }
+    else if (error == 4)
+    {
+      logMessage("I2C Unknown error at address 0x");
+      if (address < 16)
+        logPrint("0");
+      Serial.print(address, HEX);
+    }
+  }
+  if (nDevices == 0)
+    logMessage("No I2C devices found\n");
+  else
+    logMessage("I2C scan done\n");
+}
+
 
 
 // Common Utilities

@@ -1,3 +1,5 @@
+#include <WiiChuck.h>
+
 
 
 /*
@@ -28,24 +30,13 @@
 
 #include <LiquidCrystal_I2C.h> //This library you can add via Include Library > Manage Library >
 
-#include <EEPROM.h>
-
-#include <Adafruit_PWMServoDriver.h>
-
-
-// SERVO SETUP
-#define SERVOMIN 150  // min pulse length count (out of 4096)
-#define SERVOMAX 600
-uint8_t servonum=0;
-Adafruit_PWMServoDriver servoDriver1 = Adafruit_PWMServoDriver(0x40);  // 0x40 is the boards address
-
 
 //
 // Configuration Data
 //
 
 // MicroController ID
-int DEVICE_ID = 1;
+int DEVICE_ID = 2;
 char DEVICE[12];
 
 // Wifi Settings
@@ -64,16 +55,14 @@ const char *mqttServer = "10.0.0.28";
 const int mqttPort = 1883;
 const char *mqttUser = "blpete";
 const char *mqttPassword = "Peterson2016!";
-const char *nodeName = "ESP8266-1";
+const char *nodeName = "ESP8266-2";
 boolean mqttInitialized = false;
 boolean lcdInitialized = false;
 
 LiquidCrystal_I2C lcd(0x3F, 16, 2);
 
-//Motor 1 control
-int ENA = 4;
-int IN1 = 0;
-int IN2 = 2;
+// wiichuck
+Accessory nunchuck1;
 
 
 
@@ -94,8 +83,6 @@ void setup()
   // Configure Wifi
   configureWifi();
 
-  // Real Time Clock
-  startupRTC();
 
   // startup OTA
   startupOTA();
@@ -107,8 +94,6 @@ void setup()
   startupDevice(DEVICE);
  
 
-  //EEPROM.begin(256);
-
   if (lcdInitialized) {
     lcd.begin(16, 2);
     lcd.init();      // initializing the LCD
@@ -119,20 +104,25 @@ void setup()
     lcd.print(DEVICE); // Start Print Test to Line 2
   }
                                         // lcdInitialized = true;
-                                     
- // readConfig();
 
-     startupServo();
- 
+
+    // setup nunchuck
+
+      nunchuck1.begin();
+      if (nunchuck1.type == Unknown) {
+        /** If the device isn't auto-detected, set the type explicatly
+         *  NUNCHUCK,
+         WIICLASSIC,
+         GuitarHeroController,
+         GuitarHeroWorldTourDrums,
+         DrumController,
+         DrawsomeTablet,
+         Turntable
+         */
+        nunchuck1.type = NUNCHUCK;
+      }
+      
     logMessage("System initialized");    
-
-  // set all the motor control pins to outputs
-  
-  pinMode(ENA, OUTPUT);
-  pinMode(IN1, OUTPUT);
-  pinMode(IN2, OUTPUT);
-
-
                                         
 }
 
@@ -149,15 +139,21 @@ void loop()
   // MQTT loop
   mqttClient.loop();
 
-  delay(1000);
-  Serial.print(".");
+  sendNunchuck();
+
+  delay(100);
 }
 
-void startupServo() {
-  servoDriver1.begin();
-  servoDriver1.setPWMFreq(60);
-  Serial.println("Servo Started");
+void sendNunchuck() {
+  nunchuck1.readData();    // Read inputs and update maps
+  nunchuck1.printInputs(); // Print all inputs
+  for (int i = 0; i < WII_VALUES_ARRAY_SIZE; i++) {
+    Serial.println(
+        "Controller Val " + String(i) + " = "
+            + String((uint8_t) nunchuck1.values[i]));
+  }
 }
+
 
 void startupDevice(char* device) {
    logMessage("Device Initialized2:");
@@ -185,43 +181,6 @@ void logPrint(char *msg)
   Serial.print(msg);
 }
 
-void readConfig() {
-  
-  byte high = EEPROM.read(0); //read the first half
-  byte low = EEPROM.read(1); //read the second half
-  
-  int size = (high << 8) + low; //reconstruct the integer
-
-    char str[80];
-   sprintf(str, "Value of Len = %d", size);
-   logMessage(str);
-   
-  char temp[size];// = new char[size];
-  for (int i=0; i<size; i++) {
-    temp[i] = EEPROM.read(i+2);
-  }
-  temp[size]=0;
-  logMessage("Reading CONFIG from EEPROM");
-  logMessage(temp);
-}
-
-void writeConfig(String config) {
-  int len =  config.length();
-  byte high =len/256;
-  byte low =len- (high*256);
-
-    char str[80];
-   sprintf(str, "Value of Len = %d", low);
-   logMessage(str);
-  
-  EEPROM.write(0, high);
-  EEPROM.write(1,  low);
-  for (int i=0; i<len; i++) {
-    EEPROM.write(i+2,config[i]);
-  }
-  EEPROM.commit();
-  logMessage("wrote config");
-}
 
 
 // I2C common Utilities
@@ -350,46 +309,7 @@ void scanWifiNetworks()
   Serial.println("");
 }
 
-void startupRTC()
-{
-  setRealTimeClock();
-}
 
-void setRealTimeClock()
-{
-  logMessage("RTC is being set!");
-  // following line sets the RTC to the date & time this sketch was compiled
-  //rtc.adjust(DateTime(__DATE__, __TIME__));
-  // rtc.SetTime(00,40,13,1,06,03,17);
-}
-
-void logRealTimeClock()
-{
-  // rtc.DisplayTime();
-  long now = 0; //rtc.now();
-  logMessage("RTC value:");
-  Serial.println(now);
-  //    Serial.print(now.year(), DEC);
-  //    Serial.print('/');
-  //    Serial.print(now.month(), DEC);
-  //    Serial.print('/');
-  //    Serial.print(now.day(), DEC);
-  //    Serial.print(' ');
-  //    Serial.print(now.hour(), DEC);
-  //    Serial.print(':');
-  //    Serial.print(now.minute(), DEC);
-  //    Serial.print(':');
-  //    Serial.print(now.second(), DEC);
-  //    Serial.println();
-  //
-  //    Serial.print(" since midnight 1/1/1970 = ");
-  //    Serial.print(now.unixtime());
-  //    Serial.print("s = ");
-  //    Serial.print(now.unixtime() / 86400L);
-  //    Serial.println("d");
-  //
-  //      Serial.println();
-}
 
 void startupOTA()
 {
@@ -488,18 +408,6 @@ void mqttCallback(char *topic, byte *payload, unsigned int length)
 
  String getValue(String data, char separator, int index)
 {
-//    int found = 0;
-//    int strIndex[] = { 0, -1 };
-//    int maxIndex = data.length() - 1;
-//
-//    for (int i = 0; i <= maxIndex && found <= index; i++) {
-//        if (data.charAt(i) == separator || i == maxIndex) {
-//            found++;
-//            strIndex[0] = strIndex[1] + 1;
-//            strIndex[1] = (i == maxIndex) ? i+1 : i;
-//        }
-//    }
-//    return found > index ? data.substring(strIndex[0], strIndex[1]) : "";
     String val ="";
     int i = data.indexOf(separator);
     if (i >0) {
@@ -531,11 +439,11 @@ void executeCommand(String message)
   else if (message.startsWith( "lcd-clear")) {
     lcd.clear();
   }
-  else if (message == "pin1-on")
+  else if (message.startsWith( "pin1-on"))
   {
     digitalWrite(BUILTIN_LED, LOW); // Turn the LED on (Note that LOW is the voltage level
   }
-  else if (message == "pin1-off")
+  else if (message.startsWith( "pin1-off"))
   {
     digitalWrite(BUILTIN_LED, HIGH); // Turn the LED off by making the voltage HIGH
   }
@@ -543,15 +451,10 @@ void executeCommand(String message)
   {
     scanI2CBus();
   }
-  else if (message == "wifi-scan")
+  else if (message.startsWith( "wifi-scan"))
   {
     scanWifiNetworks();
-  } else if (message.startsWith("write-config")) {
-    writeConfig(param);
-  }
-  else if (message.startsWith("read-config")) {
-    readConfig();
-  }
+  } 
   else
   {
     Serial.println("not processed");

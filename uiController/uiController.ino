@@ -19,6 +19,9 @@
 //  MQTT Interface
 #include <PubSubClient.h>
 
+#include <LiquidCrystal_I2C.h> //This library you can add via Include Library > Manage Library >
+
+
 // MicroController ID
 #define DEVICE_ID ESP8266-UI
 
@@ -28,6 +31,7 @@ char pass[] = "2603380139";  // your network password
 int wifiStatus = WL_IDLE_STATUS;     // the Wifi radio's status
 WiFiClient wifiClient;
 
+LiquidCrystal_I2C lcd(0x27,16,2); // set the LCD address 
 
 // MQTT configurationPubSubClient client(espClient);
 // dependency on Wifi
@@ -45,12 +49,29 @@ void setup()
 {
     //Setup Serial Communications
     Serial.begin(115200);
+    lcd.init();
+    lcd.backlight();
+    lcd.setCursor(0,0);
+    lcd.print("It WORKS!!!!!!");
+
+    scanI2CBus();
+
+    
+  // Configure Wifi
+  configureWifi();
+
+    // startup OTA
+  startupOTA();
+  
+    // startup MQTT
+  startupMQTT();
+
+
 }
 
 // Main Looop 
 void loop()
 {
-    scanI2CBus();
 
 
     // OTA update loop
@@ -61,6 +82,73 @@ void loop()
 
     delay(2000);
 }
+
+//  Configure Wifi subsystem
+void configureWifi()
+{
+  WiFi.mode(WIFI_STA); // set to station mode
+
+ // scanWifiNetworks();
+
+  while (wifiStatus != WL_CONNECTED)
+  {
+    logMessage("Attempting to connect to WPA SSID: ");
+    logMessage(ssid);
+    // Connect to WPA/WPA2 network:
+    wifiStatus = WiFi.begin(ssid, pass);
+
+    // wait 10 seconds for connection:
+    delay(5000);
+  }
+}
+
+void startupMQTT()
+{
+  // setup mqtt
+  mqttClient.setServer(mqttServer, mqttPort);
+
+  while (!mqttClient.connected())
+  {
+    Serial.println("Connecting to MQTT...");
+
+    if (mqttClient.connect(nodeName, mqttUser, mqttPassword))
+    {
+      logMessage("MQTT connected");
+    }
+    else
+    {
+      logMessage("MQTT failed with state:");
+      Serial.println(mqttClient.state());
+      delay(2000);
+    }
+  }
+
+//    const char* DEVICE = String(DEVICE_ID).c_str();
+ // mqttClient.publish("devices", DEVICE);
+
+  mqttClient.subscribe("esp/msg");
+  mqttClient.setCallback(mqttCallback);
+    mqttInitialized = true;
+    logMessage("MQTT initialized");
+}
+
+void mqttCallback(char *topic, byte *payload, unsigned int length)
+{
+  Serial.print("Message arrived [");
+  Serial.print(topic);
+  Serial.print("] ");
+  for (int i = 0; i < length; i++)
+  {
+    Serial.print((char)payload[i]);
+  }
+
+  payload[length] = '\0'; // Null terminator used to terminate the char array
+  String message = (char *)payload;
+  Serial.println(message);
+
+  lcd.print(message);
+}
+
 
 // I2C common Utilities
 void scanI2CBus()

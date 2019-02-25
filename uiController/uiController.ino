@@ -52,7 +52,7 @@ void setup()
     lcd.init();
     lcd.backlight();
     lcd.setCursor(0,0);
-    lcd.print("It WORKS!!!!!!");
+    lcd.print("Initializing...");
 
     scanI2CBus();
 
@@ -66,7 +66,9 @@ void setup()
     // startup MQTT
   startupMQTT();
 
-
+    lcd.setCursor(0,0);
+    lcd.print("waiting...");
+  
 }
 
 // Main Looop 
@@ -100,6 +102,9 @@ void configureWifi()
     // wait 10 seconds for connection:
     delay(5000);
   }
+
+    lcd.setCursor(0,0);
+    lcd.print("wifi found...");
 }
 
 void startupMQTT()
@@ -114,6 +119,8 @@ void startupMQTT()
     if (mqttClient.connect(nodeName, mqttUser, mqttPassword))
     {
       logMessage("MQTT connected");
+          lcd.setCursor(0,0);
+          lcd.print("mqtt init...");
     }
     else
     {
@@ -146,6 +153,8 @@ void mqttCallback(char *topic, byte *payload, unsigned int length)
   String message = (char *)payload;
   Serial.println(message);
 
+  lcd.clear();
+  lcd.setCursor(0,0);
   lcd.print(message);
 }
 

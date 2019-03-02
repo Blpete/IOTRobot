@@ -82,7 +82,7 @@ void loop()
     // MQTT loop
     mqttClient.loop();
 
-    delay(2000);
+    delay(100);
 }
 
 //  Configure Wifi subsystem

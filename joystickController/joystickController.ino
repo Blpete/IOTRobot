@@ -40,8 +40,8 @@ int DEVICE_ID = 2;
 char DEVICE[12];
 
 // Wifi Settings
-char ssid[] = "iotlink";         //  your network SSID (name)
-char pass[] = "2603380139!";     //"peterson1";  // your network password
+char ssid[] = "superduperlink ";         //  your network SSID (name)
+char pass[] = "2603380139";     //"peterson1";  // your network password
 int wifiStatus = WL_IDLE_STATUS; // the Wifi radio's status
 WiFiClient wifiClient;
 
@@ -55,7 +55,7 @@ const char *mqttServer = "10.0.0.28";
 const int mqttPort = 1883;
 const char *mqttUser = "blpete";
 const char *mqttPassword = "Peterson2016!";
-const char *nodeName = "ESP8266-2";
+const char *nodeName = "ESP8266-J";
 boolean mqttInitialized = false;
 boolean lcdInitialized = false;
 
@@ -64,7 +64,7 @@ LiquidCrystal_I2C lcd(0x3F, 16, 2);
 // wiichuck
 Accessory nunchuck1;
 
-
+boolean button_z = false;
 
 // One time setup
 void setup()
@@ -79,10 +79,10 @@ void setup()
   // Setup I2C communications
   Wire.begin();
   logMessage("I2C communicaton started");
+  scanI2CBus();
 
   // Configure Wifi
   configureWifi();
-
 
   // startup OTA
   startupOTA();
@@ -122,14 +122,14 @@ void setup()
         nunchuck1.type = NUNCHUCK;
       }
       
-    logMessage("System initialized");    
+    logMessage("Input init");    
                                         
 }
 
 // Main Looop
 void loop()
 {
- // scanI2CBus();
+
 
   //   logRealTimeClock();
 
@@ -147,12 +147,37 @@ void loop()
 void sendNunchuck() {
   nunchuck1.readData();    // Read inputs and update maps
   nunchuck1.printInputs(); // Print all inputs
-  for (int i = 0; i < WII_VALUES_ARRAY_SIZE; i++) {
-    Serial.println(
-        "Controller Val " + String(i) + " = "
-            + String((uint8_t) nunchuck1.values[i]));
-  }
+//  for (int i = 0; i < WII_VALUES_ARRAY_SIZE; i++) {
+//      Serial.println(
+//        "Controller Val " + String(i) + " = "
+//            + String((uint8_t) nunchuck1.values[i]));
+//
+//  }
+
+   if (mqttInitialized)
+     {
+     if (nunchuck1.values[10]>0){
+      // transition to push
+         if (button_z == false) {
+             mqttClient.publish("esp/button_z", "1");
+             logMessage("pushed");
+             button_z = true;
+         } 
+     } else {
+      // transition to not pushed
+         if (button_z == true) {
+             mqttClient.publish("esp/button_z", "0");
+             logMessage("released");
+             button_z = false ;
+         } 
+     }
+     
+       mqttClient.publish("esp/input_x", String((uint8_t)nunchuck1.values[0]).c_str());
+       mqttClient.publish("esp/input_y", String((uint8_t)nunchuck1.values[1]).c_str());
+    
+   }
 }
+
 
 
 void startupDevice(char* device) {
@@ -168,7 +193,7 @@ void logMessage(const char *msg)
   Serial.println(msg);
   if (mqttInitialized)
   {
-    mqttClient.publish("esp/log", msg);
+    mqttClient.publish("esp/msg", msg);
   }
   if (lcdInitialized) {
     lcd.setCursor(0, 1);
@@ -378,9 +403,6 @@ void startupMQTT()
       delay(2000);
     }
   }
-
-//    const char* DEVICE = String(DEVICE_ID).c_str();
- // mqttClient.publish("devices", DEVICE);
 
   mqttClient.subscribe("esp/msg");
   mqttClient.setCallback(mqttCallback);

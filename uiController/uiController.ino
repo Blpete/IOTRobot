@@ -55,16 +55,15 @@ void setup()
     lcd.print("Initializing...");
 
     scanI2CBus();
+      
+    // Configure Wifi
+    configureWifi();
 
+      // startup OTA
+    startupOTA();
     
-  // Configure Wifi
-  configureWifi();
-
-    // startup OTA
-  startupOTA();
-  
-    // startup MQTT
-  startupMQTT();
+      // startup MQTT
+    startupMQTT();
 
     lcd.setCursor(0,0);
     lcd.print("waiting...");
@@ -74,8 +73,6 @@ void setup()
 // Main Looop 
 void loop()
 {
-
-
     // OTA update loop
     ArduinoOTA.handle();
 
@@ -88,6 +85,11 @@ void loop()
 //  Configure Wifi subsystem
 void configureWifi()
 {
+  lcd.setCursor(0,0);
+  lcd.clear();
+  lcd.print("connecting wifi:");
+  lcd.setCursor(0,1);
+  lcd.print(ssid);
   WiFi.mode(WIFI_STA); // set to station mode
 
  // scanWifiNetworks();
@@ -133,10 +135,10 @@ void startupMQTT()
 //    const char* DEVICE = String(DEVICE_ID).c_str();
  // mqttClient.publish("devices", DEVICE);
 
-  mqttClient.subscribe("esp/msg");
-  mqttClient.setCallback(mqttCallback);
-    mqttInitialized = true;
-    logMessage("MQTT initialized");
+   mqttClient.subscribe("esp/msg");
+   mqttClient.setCallback(mqttCallback);
+   mqttInitialized = true;
+   logMessage("MQTT initialized");
 }
 
 void mqttCallback(char *topic, byte *payload, unsigned int length)
@@ -144,10 +146,6 @@ void mqttCallback(char *topic, byte *payload, unsigned int length)
   Serial.print("Message arrived [");
   Serial.print(topic);
   Serial.print("] ");
-  for (int i = 0; i < length; i++)
-  {
-    Serial.print((char)payload[i]);
-  }
 
   payload[length] = '\0'; // Null terminator used to terminate the char array
   String message = (char *)payload;
@@ -210,45 +208,43 @@ void logPrint(char* msg) {
     Serial.print(msg);
 }
 
-
-
 void startupOTA() {
- // Port defaults to 8266
-  // ArduinoOTA.setPort(8266);
+  // Port defaults to 8266
+    // ArduinoOTA.setPort(8266);
 
-  // Hostname defaults to esp8266-[ChipID]
-  // ArduinoOTA.setHostname("myesp8266");
+    // Hostname defaults to esp8266-[ChipID]
+    // ArduinoOTA.setHostname("myesp8266");
 
-  // No authentication by default
-  // ArduinoOTA.setPassword("admin");
+    // No authentication by default
+    // ArduinoOTA.setPassword("admin");
 
-  // Password can be set with it's md5 value as well
-  // MD5(admin) = 21232f297a57a5a743894a0e4a801fc3
-  // ArduinoOTA.setPasswordHash("21232f297a57a5a743894a0e4a801fc3");
+    // Password can be set with it's md5 value as well
+    // MD5(admin) = 21232f297a57a5a743894a0e4a801fc3
+    // ArduinoOTA.setPasswordHash("21232f297a57a5a743894a0e4a801fc3");
 
-  ArduinoOTA.onStart([]() {
-    String type;
-    if (ArduinoOTA.getCommand() == U_FLASH)
-      type = "sketch";
-    else // U_SPIFFS
-      type = "filesystem";
+    ArduinoOTA.onStart([]() {
+      String type;
+      if (ArduinoOTA.getCommand() == U_FLASH)
+        type = "sketch";
+      else // U_SPIFFS
+        type = "filesystem";
 
-    // NOTE: if updating SPIFFS this would be the place to unmount SPIFFS using SPIFFS.end()
-    Serial.println("Start updating " + type);
-  });
-  ArduinoOTA.onEnd([]() {
-    Serial.println("\nEnd");
-  });
-  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
-    Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
-  });
-  ArduinoOTA.onError([](ota_error_t error) {
-    Serial.printf("Error[%u]: ", error);
-    if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
-    else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
-    else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
-    else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
-    else if (error == OTA_END_ERROR) Serial.println("End Failed");
-  });
-  ArduinoOTA.begin();
+      // NOTE: if updating SPIFFS this would be the place to unmount SPIFFS using SPIFFS.end()
+      Serial.println("Start updating " + type);
+    });
+    ArduinoOTA.onEnd([]() {
+      Serial.println("\nEnd");
+    });
+    ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+      Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
+    });
+    ArduinoOTA.onError([](ota_error_t error) {
+      Serial.printf("Error[%u]: ", error);
+      if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
+      else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
+      else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
+      else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
+      else if (error == OTA_END_ERROR) Serial.println("End Failed");
+    });
+    ArduinoOTA.begin();
   }

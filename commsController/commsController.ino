@@ -5,11 +5,6 @@
 
 #include <PubSubClient.h>
 
-#include <WiFiClient.h>
-#include <WiFi.h>
-#include <WiFiUdp.h>
-#include <WiFiServer.h>
-
 #include <Wire.h>  // Only needed for Arduino 1.6.5 and earlier
 #include "SSD1306.h" // alias for `#include "SSD1306Wire.h"`
 

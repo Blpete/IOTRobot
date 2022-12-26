@@ -7,4 +7,4 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v2
       - name: Build on Arduino CLI
-        run: bash ci/buid-arduino/buildarduino.sh
+        run: bash ci/build-arduino/buildarduino.sh

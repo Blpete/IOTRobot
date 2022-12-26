@@ -13,3 +13,11 @@ export PATH=$PATH:$GITHUB_WORKSPACE/bin
 curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh
 arduino-cli config init
 arduino-cli core update-index
+# Install Arduino AVR core
+arduino-cli core install arduino:avr
+# Link Arduino library
+ln -s $GITHUB_WORKSPACE $HOME/Arduino/libraries/CI_Test_Library
+# Compile all *.ino files for the Arduino Uno
+for f in **/*.ino ; do
+    arduino-cli compile -b arduino:avr:uno $f
+done

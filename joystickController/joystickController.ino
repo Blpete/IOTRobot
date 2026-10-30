@@ -1,199 +1,120 @@
-#include <WiiChuck.h>
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2018 Barry Peterson
 
+// Part example: Wii nunchuck publisher. Not integrated beyond MQTT.
+// Publishes esp/input_x, esp/input_y, and esp/button_z. The main robot
+// sketch subscribes to Y and Z.
 
-
-/*
-    Master IOT ROBOT sketch for ESP8266
-    Barry peterson
-    Copyright 5/26/2018.  All Rights Reserved
-*/
-
-// Wifi
-#include <ESP8266WiFi.h>
-// Managing common includes
-// I2C
 #include <Wire.h>
-//
-//#include <WiFiClient.h>
-//#include <WiFi.h>
-//#include <WiFiUdp.h>
-//#include <WiFiServer.h>
+#include <WiiChuck.h>
+#include <LiquidCrystal_I2C.h>
+#include <IotRobotNet.h>
 
-// Real Time Clock (RTC)
-//#include <RTC_DS1307.h>
-
-// Over the Air (OTA) updating
-#include <ArduinoOTA.h>
-
-//  MQTT Interface
-#include <PubSubClient.h>
-
-#include <LiquidCrystal_I2C.h> //This library you can add via Include Library > Manage Library >
-
-
-//
-// Configuration Data
-//
-
-// MicroController ID
-int DEVICE_ID = 2;
 char DEVICE[12];
-
-// Wifi Settings
-char ssid[] = "superduperlink ";         //  your network SSID (name)
-char pass[] = "2603380139";     //"peterson1";  // your network password
-int wifiStatus = WL_IDLE_STATUS; // the Wifi radio's status
-WiFiClient wifiClient;
-
-// Real Time Clock
-//RTC_DS1307 rtc;
-
-// MQTT configurationPubSubClient client(espClient);
-// dependency on Wifi
-PubSubClient mqttClient(wifiClient);
-const char *mqttServer = "10.0.0.28";
-const int mqttPort = 1883;
-const char *mqttUser = "blpete";
-const char *mqttPassword = "Peterson2016!";
-const char *nodeName = "ESP8266-J";
-boolean mqttInitialized = false;
-boolean lcdInitialized = false;
-
+IotRobotNet net("joy");
 LiquidCrystal_I2C lcd(0x3F, 16, 2);
-
-// wiichuck
 Accessory nunchuck1;
+bool lcdInitialized = false;
+bool haveSample = false;
+bool buttonZ = false;
+int lastX = 0;
+int lastY = 0;
+unsigned long lastNunchuckMs = 0;
 
-boolean button_z = false;
+void logMessage(const char* msg);
+void onMqtt(char* topic, uint8_t* payload, unsigned int length);
+void setupLcd();
+void sendNunchuck();
+void executeCommand(const char* message);
+void scanI2CBus();
 
-// One time setup
-void setup()
-{
-  DEVICE_ID = ESP.getChipId();
-  sprintf(DEVICE,"\t%08X", DEVICE_ID);
-  //const char* DEVICE = String(DEVICE_ID).c_str();
-  //Setup Serial Communications
+void setup() {
   Serial.begin(115200);
-  logMessage("Serial Interface started at 115200 baud");
+  snprintf(DEVICE, sizeof(DEVICE), "%08lX", (unsigned long)ESP.getChipId());
+  logMessage("Serial started");
 
-  // Setup I2C communications
   Wire.begin();
-  logMessage("I2C communicaton started");
+  setupLcd();
   scanI2CBus();
 
-  // Configure Wifi
-  configureWifi();
-
-  // startup OTA
-  startupOTA();
-
-  // startup MQTT
-  startupMQTT();
-
-  // Configure Device
-  startupDevice(DEVICE);
- 
-
-  if (lcdInitialized) {
-    lcd.begin(16, 2);
-    lcd.init();      // initializing the LCD
-    lcd.backlight(); // Enable or Turn On the backlight
-    lcd.setCursor(0, 1);
-    lcd.print("I'm Alive"); // Start Print text to Line 1
-    lcd.setCursor(0, 2);
-    lcd.print(DEVICE); // Start Print Test to Line 2
+  nunchuck1.begin();
+  if (nunchuck1.type == UnknownChuck) {
+    nunchuck1.type = NUNCHUCK;
   }
-                                        // lcdInitialized = true;
+  logMessage("Nunchuck init");
 
-
-    // setup nunchuck
-
-      nunchuck1.begin();
-      if (nunchuck1.type == Unknown) {
-        /** If the device isn't auto-detected, set the type explicatly
-         *  NUNCHUCK,
-         WIICLASSIC,
-         GuitarHeroController,
-         GuitarHeroWorldTourDrums,
-         DrumController,
-         DrawsomeTablet,
-         Turntable
-         */
-        nunchuck1.type = NUNCHUCK;
-      }
-      
-    logMessage("Input init");    
-                                        
+  net.setHandler(onMqtt);
+  net.begin();
+  net.subscribe("esp/msg");
+  logMessage(net.clientId());
 }
 
-// Main Looop
-void loop()
-{
+void loop() {
+  net.loop();
+  if (millis() - lastNunchuckMs >= 50) {
+    lastNunchuckMs = millis();
+    sendNunchuck();
+  }
+}
 
-
-  //   logRealTimeClock();
-
-  // OTA update loop
-  ArduinoOTA.handle();
-
-  // MQTT loop
-  mqttClient.loop();
-
-  sendNunchuck();
-
-  delay(100);
+void onMqtt(char* topic, uint8_t* payload, unsigned int length) {
+  char message[128];
+  if (strcmp(topic, "esp/msg") != 0) {
+    return;
+  }
+  if (length >= sizeof(message)) {
+    Serial.println("MQTT payload too long");
+    return;
+  }
+  memcpy(message, payload, length);
+  message[length] = '\0';
+  executeCommand(message);
 }
 
 void sendNunchuck() {
-  nunchuck1.readData();    // Read inputs and update maps
-  nunchuck1.printInputs(); // Print all inputs
-//  for (int i = 0; i < WII_VALUES_ARRAY_SIZE; i++) {
-//      Serial.println(
-//        "Controller Val " + String(i) + " = "
-//            + String((uint8_t) nunchuck1.values[i]));
-//
-//  }
+  nunchuck1.readData();
+  if (!net.mqttConnected()) {
+    return;
+  }
+  int x = nunchuck1.getJoyX();
+  int y = nunchuck1.getJoyY();
+  bool z = nunchuck1.getButtonZ();
+  char buf[8];
 
-   if (mqttInitialized)
-     {
-     if (nunchuck1.values[10]>0){
-      // transition to push
-         if (button_z == false) {
-             mqttClient.publish("esp/button_z", "1");
-             logMessage("pushed");
-             button_z = true;
-         } 
-     } else {
-      // transition to not pushed
-         if (button_z == true) {
-             mqttClient.publish("esp/button_z", "0");
-             logMessage("released");
-             button_z = false ;
-         } 
-     }
-     
-       mqttClient.publish("esp/input_x", String((uint8_t)nunchuck1.values[0]).c_str());
-       mqttClient.publish("esp/input_y", String((uint8_t)nunchuck1.values[1]).c_str());
-    
-   }
+  if (!haveSample || abs(x - lastX) >= 2) {
+    snprintf(buf, sizeof(buf), "%d", x);
+    net.publish("esp/input_x", buf);
+    lastX = x;
+  }
+  if (!haveSample || abs(y - lastY) >= 2) {
+    snprintf(buf, sizeof(buf), "%d", y);
+    net.publish("esp/input_y", buf);
+    lastY = y;
+  }
+  if (!haveSample || z != buttonZ) {
+    net.publish("esp/button_z", z ? "1" : "0");
+    logMessage(z ? "Z pressed" : "Z released");
+    buttonZ = z;
+  }
+  haveSample = true;
 }
 
-
-
-void startupDevice(char* device) {
-   logMessage("Device Initialized2:");
-  //logMessage(DEVICE);
- // String msg = "VCC="+ESP.getVcc();
- // logMessage(msg.c_str());
+void setupLcd() {
+  lcd.init();
+  lcd.begin(16, 2);
+  lcd.backlight();
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Joy");
+  lcd.setCursor(0, 1);
+  lcd.print(DEVICE);
+  lcdInitialized = true;
 }
 
-// Common Utilities
-void logMessage(const char *msg)
-{
+void logMessage(const char* msg) {
   Serial.println(msg);
-  if (mqttInitialized)
-  {
-    mqttClient.publish("esp/msg", msg);
+  if (!net.inCallback()) {
+    net.publish("esp/log", msg);
   }
   if (lcdInitialized) {
     lcd.setCursor(0, 1);
@@ -201,291 +122,62 @@ void logMessage(const char *msg)
   }
 }
 
-void logPrint(char *msg)
-{
-  Serial.print(msg);
-}
-
-
-
-// I2C common Utilities
-void scanI2CBus()
-{
-  byte error, address;
-  int nDevices;
-
-  logMessage("Scanning I2C Bus...");
-
-  nDevices = 0;
-  for (address = 1; address < 127; address++)
-  {
-
-    Wire.beginTransmission(address);
-    error = Wire.endTransmission();
-
-    if (error == 0)
-    {
-      logMessage("I2C device found at address 0x");
-      if (address < 16)
-        Serial.print("0");
-      Serial.println(address, HEX);
-      //todo  logPrint(address,HEX);
-      logMessage("  !");
-
-      nDevices++;
-    }
-    else if (error == 4)
-    {
-      logMessage("I2C Unknown error at address 0x");
-      if (address < 16)
-        logPrint("0");
-      Serial.print(address, HEX);
-    }
+const char* argAfter(const char* message) {
+  const char* p = strchr(message, '=');
+  if (p == nullptr || p == message) {
+    return "";
   }
-  if (nDevices == 0)
-    logMessage("No I2C devices found\n");
-  else
-    logMessage("I2C scan done\n");
+  return p + 1;
 }
 
-//  Configure Wifi subsystem
-void configureWifi()
-{
-  WiFi.mode(WIFI_STA); // set to station mode
-
-  scanWifiNetworks();
-
-  while (wifiStatus != WL_CONNECTED)
-  {
-    logMessage("Attempting to connect to WPA SSID: ");
-    logMessage(ssid);
-    // Connect to WPA/WPA2 network:
-    wifiStatus = WiFi.begin(ssid, pass);
-
-    // wait 10 seconds for connection:
-    delay(5000);
+void executeCommand(const char* message) {
+  const char* param = argAfter(message);
+  if (!lcdInitialized) {
+    return;
   }
-  printWifiData();
-}
-
-// Log WIFI configuration Data
-void printWifiData()
-{
-  // print the SSID of the network you're attached to:
-  logMessage("SSID: ");
-  // logMessage(WiFi.SSID());
-
-  // print your WiFi shield's IP address:
-  IPAddress ip = WiFi.localIP();
-  logPrint("IP Address: ");
-  Serial.println(ip);
-  lcd.setCursor(0, 1);
-  lcd.print(ip);
-  // logMessage(ip);
-
-  // print your MAC address:
-  byte mac[6];
-  WiFi.macAddress(mac);
-  logPrint("MAC address: ");
-  //  logPrint(mac[5], HEX);
-  //  logPrint(":");
-  //  logPrint(mac[4], HEX);
-  //  logPrint(":");
-  //  logPrint(mac[3], HEX);
-  //  logPrint(":");
-  //  logPrint(mac[2], HEX);
-  //  logPrint(":");
-  //  logPrint(mac[1], HEX);
-  //  logPrint(":");
-  //  logPrint(mac[0], HEX);
-
-  // Wifi signal strength
-  long rssi = WiFi.RSSI();
-  Serial.print("signal strength (RSSI):");
-  Serial.println(rssi);
-}
-
-void scanWifiNetworks()
-{
-  // WiFi.scanNetworks will return the number of networks found
-  int n = WiFi.scanNetworks();
-  Serial.println("scan done");
-  if (n == 0)
-  {
-    Serial.println("no networks found");
-  }
-  else
-  {
-    Serial.print(n);
-    Serial.println(" networks found");
-    for (int i = 0; i < n; ++i)
-    {
-      // Print SSID and RSSI for each network found
-      Serial.print(i + 1);
-      Serial.print(": ");
-      Serial.print(WiFi.SSID(i));
-      Serial.print(" (");
-      Serial.print(WiFi.RSSI(i));
-      Serial.print(")");
-      Serial.println((WiFi.encryptionType(i) == ENC_TYPE_NONE) ? " " : "*");
-      delay(10);
-    }
-  }
-  Serial.println("");
-}
-
-
-
-void startupOTA()
-{
-  // Port defaults to 8266
-  // ArduinoOTA.setPort(8266);
-
-  // Hostname defaults to esp8266-[ChipID]
-  // ArduinoOTA.setHostname("myesp8266");
-
-  // No authentication by default
-  // ArduinoOTA.setPassword("admin");
-
-  // Password can be set with it's md5 value as well
-  // MD5(admin) = 21232f297a57a5a743894a0e4a801fc3
-  // ArduinoOTA.setPasswordHash("21232f297a57a5a743894a0e4a801fc3");
-
-  ArduinoOTA.onStart([]() {
-    String type;
-    if (ArduinoOTA.getCommand() == U_FLASH)
-      type = "sketch";
-    else // U_SPIFFS
-      type = "filesystem";
-
-    // NOTE: if updating SPIFFS this would be the place to unmount SPIFFS using SPIFFS.end()
-    Serial.println("Start updating " + type);
-  });
-  ArduinoOTA.onEnd([]() {
-    Serial.println("\nEnd");
-  });
-  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
-    Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
-  });
-  ArduinoOTA.onError([](ota_error_t error) {
-    Serial.printf("Error[%u]: ", error);
-    if (error == OTA_AUTH_ERROR)
-      Serial.println("Auth Failed");
-    else if (error == OTA_BEGIN_ERROR)
-      Serial.println("Begin Failed");
-    else if (error == OTA_CONNECT_ERROR)
-      Serial.println("Connect Failed");
-    else if (error == OTA_RECEIVE_ERROR)
-      Serial.println("Receive Failed");
-    else if (error == OTA_END_ERROR)
-      Serial.println("End Failed");
-  });
-  ArduinoOTA.begin();
-}
-
-void startupMQTT()
-{
-  // setup mqtt
-  mqttClient.setServer(mqttServer, mqttPort);
-
-  while (!mqttClient.connected())
-  {
-    Serial.println("Connecting to MQTT...");
-
-    if (mqttClient.connect(nodeName, mqttUser, mqttPassword))
-    {
-      logMessage("MQTT connected");
-    }
-    else
-    {
-      logMessage("MQTT failed with state:");
-      Serial.println(mqttClient.state());
-      delay(2000);
-    }
-  }
-
-  mqttClient.subscribe("esp/msg");
-  mqttClient.setCallback(mqttCallback);
-    mqttInitialized = true;
-    logMessage("MQTT initialized");
-}
-
-void mqttCallback(char *topic, byte *payload, unsigned int length)
-{
-  Serial.print("Message arrived [");
-  Serial.print(topic);
-  Serial.print("] ");
-  for (int i = 0; i < length; i++)
-  {
-    Serial.print((char)payload[i]);
-  }
-
-  payload[length] = '\0'; // Null terminator used to terminate the char array
-  String message = (char *)payload;
-  Serial.println(message);
-
-  executeCommand(message);
-}
-
-
- String getValue(String data, char separator, int index)
-{
-    String val ="";
-    int i = data.indexOf(separator);
-    if (i >0) {
-      val = data.substring(i+1);
-    }
-    return val;
-}
-
-
-void executeCommand(String message)
-{
-  String param = getValue(message, '=',0);
-  if (message == "lcd-off")
-  {
-    Serial.println("off");
+  if (strcmp(message, "lcd-off") == 0) {
     lcd.noBacklight();
-  }
-  else if (message == "lcd-on")
-  {
-    Serial.println("on");
+  } else if (strcmp(message, "lcd-on") == 0) {
     lcd.backlight();
-  } else if (message.startsWith("lcd-write0")) {
-   lcd.setCursor(0, 0);
+  } else if (strncmp(message, "lcd-write0", 10) == 0) {
+    lcd.setCursor(0, 0);
     lcd.print(param);
-  }  else if (message.startsWith("lcd-write1")) {
-   lcd.setCursor(0, 1);
+  } else if (strncmp(message, "lcd-write1", 10) == 0) {
+    lcd.setCursor(0, 1);
     lcd.print(param);
-  }
-  else if (message.startsWith( "lcd-clear")) {
+  } else if (strncmp(message, "lcd-clear", 9) == 0) {
     lcd.clear();
-  }
-  else if (message.startsWith( "pin1-on"))
-  {
-    digitalWrite(BUILTIN_LED, LOW); // Turn the LED on (Note that LOW is the voltage level
-  }
-  else if (message.startsWith( "pin1-off"))
-  {
-    digitalWrite(BUILTIN_LED, HIGH); // Turn the LED off by making the voltage HIGH
-  }
-  else if (message.startsWith( "i2c-scan"))
-  {
+  } else if (strcmp(message, "pin1-on") == 0) {
+    pinMode(LED_BUILTIN, OUTPUT);
+    digitalWrite(LED_BUILTIN, LOW);
+  } else if (strcmp(message, "pin1-off") == 0) {
+    pinMode(LED_BUILTIN, OUTPUT);
+    digitalWrite(LED_BUILTIN, HIGH);
+  } else if (strncmp(message, "i2c-scan", 8) == 0) {
     scanI2CBus();
   }
-  else if (message.startsWith( "wifi-scan"))
-  {
-    scanWifiNetworks();
-  } 
-  else
-  {
-    Serial.println("not processed");
-    if (lcdInitialized) {
-      lcd.clear();
-      lcd.setCursor(0, 0);
-      // lcd.autoscroll();
-      lcd.print(message);
+}
+
+void scanI2CBus() {
+  int nDevices = 0;
+  logMessage("Scanning I2C...");
+  for (byte address = 1; address < 127; address++) {
+    Wire.beginTransmission(address);
+    byte error = Wire.endTransmission();
+    if (error == 0) {
+      char line[40];
+      snprintf(line, sizeof(line), "I2C found at 0x%02X", address);
+      logMessage(line);
+      nDevices++;
+    } else if (error == 4) {
+      char line[40];
+      snprintf(line, sizeof(line), "I2C error at 0x%02X", address);
+      logMessage(line);
     }
   }
-
+  if (nDevices == 0) {
+    logMessage("No I2C devices found");
+  } else {
+    logMessage("I2C scan done");
+  }
 }

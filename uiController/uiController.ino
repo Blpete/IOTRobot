@@ -1,250 +1,97 @@
-/*
-    UI Controller for IOT ROBOT sketch for ESP8266
-    Barry peterson
-    Copyright 5/26/2018.  All Rights Reserved
-*/
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2018 Barry Peterson
 
+// Part example: 16x2 I2C LCD that prints esp/msg. Not the robot controller.
+// Backpack address 0x27 is what this sketch was written against.
+// TODO/assumption: confirm the backpack on the bench. The main sketch uses 0x3F.
 
-// Wifi
-#include <ESP8266WiFi.h>
-
-
-// Over the Air (OTA) updating
-#include <ArduinoOTA.h>
-
-// Managing common includes
-// I2C
 #include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+#include <IotRobotNet.h>
 
-//  MQTT Interface
-#include <PubSubClient.h>
+IotRobotNet net("ui");
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+bool lcdReady = false;
+bool showedIp = false;
 
-#include <LiquidCrystal_I2C.h> //This library you can add via Include Library > Manage Library >
+void logMessage(const char* msg);
+void onMqtt(char* topic, uint8_t* payload, unsigned int length);
+void scanI2CBus();
 
-
-// MicroController ID
-#define DEVICE_ID ESP8266-UI
-
-// Wifi Settings
-char ssid[] = "superduperlink ";     //  your network SSID (name)
-char pass[] = "2603380139";  // your network password
-int wifiStatus = WL_IDLE_STATUS;     // the Wifi radio's status
-WiFiClient wifiClient;
-
-LiquidCrystal_I2C lcd(0x27,16,2); // set the LCD address 
-
-// MQTT configurationPubSubClient client(espClient);
-// dependency on Wifi
-PubSubClient mqttClient(wifiClient);
-const char *mqttServer = "10.0.0.28";
-const int mqttPort = 1883;
-const char *mqttUser = "blpete";
-const char *mqttPassword = "Peterson2016!";
-const char *nodeName = "ESP8266-1";
-boolean mqttInitialized = false;
-boolean lcdInitialized = false;
-
-// One time setup 
-void setup()
-{
-    //Setup Serial Communications
-    Serial.begin(115200);
-    lcd.init();
-    lcd.backlight();
-    lcd.setCursor(0,0);
-    lcd.print("Initializing...");
-
-    scanI2CBus();
-      
-    // Configure Wifi
-    configureWifi();
-
-      // startup OTA
-    startupOTA();
-    
-      // startup MQTT
-    startupMQTT();
-
-    lcd.setCursor(0,0);
-    lcd.print("waiting...");
-  
-}
-
-// Main Looop 
-void loop()
-{
-    // OTA update loop
-    ArduinoOTA.handle();
-
-    // MQTT loop
-    mqttClient.loop();
-
-    delay(100);
-}
-
-//  Configure Wifi subsystem
-void configureWifi()
-{
-  lcd.setCursor(0,0);
+void setup() {
+  Serial.begin(115200);
+  Wire.begin();
+  lcd.init();
+  lcd.begin(16, 2);
+  lcd.backlight();
   lcd.clear();
-  lcd.print("connecting wifi:");
-  lcd.setCursor(0,1);
-  lcd.print(ssid);
-  WiFi.mode(WIFI_STA); // set to station mode
+  lcd.setCursor(0, 0);
+  lcd.print("Initializing...");
+  lcdReady = true;
 
- // scanWifiNetworks();
+  scanI2CBus();
 
-  while (wifiStatus != WL_CONNECTED)
-  {
-    logMessage("Attempting to connect to WPA SSID: ");
-    logMessage(ssid);
-    // Connect to WPA/WPA2 network:
-    wifiStatus = WiFi.begin(ssid, pass);
-
-    // wait 10 seconds for connection:
-    delay(5000);
-  }
-
-    lcd.setCursor(0,0);
-    lcd.print("wifi found...");
+  net.setHandler(onMqtt);
+  net.begin();
+  net.subscribe("esp/msg");
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("waiting...");
+  logMessage(net.clientId());
 }
 
-void startupMQTT()
-{
-  // setup mqtt
-  mqttClient.setServer(mqttServer, mqttPort);
-
-  while (!mqttClient.connected())
-  {
-    Serial.println("Connecting to MQTT...");
-
-    if (mqttClient.connect(nodeName, mqttUser, mqttPassword))
-    {
-      logMessage("MQTT connected");
-          lcd.setCursor(0,0);
-          lcd.print("mqtt init...");
-    }
-    else
-    {
-      logMessage("MQTT failed with state:");
-      Serial.println(mqttClient.state());
-      delay(2000);
-    }
+void loop() {
+  net.loop();
+  if (!showedIp && net.wifiConnected()) {
+    showedIp = true;
+    lcd.setCursor(0, 1);
+    lcd.print(WiFi.localIP());
   }
-
-//    const char* DEVICE = String(DEVICE_ID).c_str();
- // mqttClient.publish("devices", DEVICE);
-
-   mqttClient.subscribe("esp/msg");
-   mqttClient.setCallback(mqttCallback);
-   mqttInitialized = true;
-   logMessage("MQTT initialized");
 }
 
-void mqttCallback(char *topic, byte *payload, unsigned int length)
-{
-  Serial.print("Message arrived [");
-  Serial.print(topic);
-  Serial.print("] ");
-
-  payload[length] = '\0'; // Null terminator used to terminate the char array
-  String message = (char *)payload;
+void onMqtt(char* topic, uint8_t* payload, unsigned int length) {
+  char message[128];
+  if (strcmp(topic, "esp/msg") != 0 || !lcdReady) {
+    return;
+  }
+  if (length >= sizeof(message)) {
+    length = sizeof(message) - 1;
+  }
+  memcpy(message, payload, length);
+  message[length] = '\0';
   Serial.println(message);
-
   lcd.clear();
-  lcd.setCursor(0,0);
+  lcd.setCursor(0, 0);
   lcd.print(message);
 }
 
+void logMessage(const char* msg) {
+  Serial.println(msg);
+  if (!net.inCallback()) {
+    net.publish("esp/log", msg);
+  }
+}
 
-// I2C common Utilities
-void scanI2CBus()
-{
-  byte error, address;
-  int nDevices;
-
-  logMessage("Scanning I2C Bus...");
-
-  nDevices = 0;
-  for (address = 1; address < 127; address++)
-  {
-
+void scanI2CBus() {
+  int nDevices = 0;
+  logMessage("Scanning I2C...");
+  for (byte address = 1; address < 127; address++) {
     Wire.beginTransmission(address);
-    error = Wire.endTransmission();
-
-    if (error == 0)
-    {
-      logMessage("I2C device found at address 0x");
-      if (address < 16)
-        Serial.print("0");
-      Serial.println(address, HEX);
-      //todo  logPrint(address,HEX);
-      logMessage("  !");
-
+    byte error = Wire.endTransmission();
+    if (error == 0) {
+      char line[40];
+      snprintf(line, sizeof(line), "I2C found at 0x%02X", address);
+      logMessage(line);
       nDevices++;
-    }
-    else if (error == 4)
-    {
-      logMessage("I2C Unknown error at address 0x");
-      if (address < 16)
-        logPrint("0");
-      Serial.print(address, HEX);
+    } else if (error == 4) {
+      char line[40];
+      snprintf(line, sizeof(line), "I2C error at 0x%02X", address);
+      logMessage(line);
     }
   }
-  if (nDevices == 0)
-    logMessage("No I2C devices found\n");
-  else
-    logMessage("I2C scan done\n");
-}
-
-
-
-// Common Utilities
-void logMessage(char* msg){
-    Serial.println(msg);
-}
-
-void logPrint(char* msg) {
-    Serial.print(msg);
-}
-
-void startupOTA() {
-  // Port defaults to 8266
-    // ArduinoOTA.setPort(8266);
-
-    // Hostname defaults to esp8266-[ChipID]
-    // ArduinoOTA.setHostname("myesp8266");
-
-    // No authentication by default
-    // ArduinoOTA.setPassword("admin");
-
-    // Password can be set with it's md5 value as well
-    // MD5(admin) = 21232f297a57a5a743894a0e4a801fc3
-    // ArduinoOTA.setPasswordHash("21232f297a57a5a743894a0e4a801fc3");
-
-    ArduinoOTA.onStart([]() {
-      String type;
-      if (ArduinoOTA.getCommand() == U_FLASH)
-        type = "sketch";
-      else // U_SPIFFS
-        type = "filesystem";
-
-      // NOTE: if updating SPIFFS this would be the place to unmount SPIFFS using SPIFFS.end()
-      Serial.println("Start updating " + type);
-    });
-    ArduinoOTA.onEnd([]() {
-      Serial.println("\nEnd");
-    });
-    ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
-      Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
-    });
-    ArduinoOTA.onError([](ota_error_t error) {
-      Serial.printf("Error[%u]: ", error);
-      if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
-      else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
-      else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
-      else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
-      else if (error == OTA_END_ERROR) Serial.println("End Failed");
-    });
-    ArduinoOTA.begin();
+  if (nDevices == 0) {
+    logMessage("No I2C devices found");
+  } else {
+    logMessage("I2C scan done");
   }
+}

@@ -1,0 +1,104 @@
+menu "IOTRobot"
+
+    config IOTROBOT_WIFI_SSID
+        string "Wi-Fi SSID"
+        default ""
+        help
+            Access point name. Leave empty to boot without Wi-Fi (the
+            nunchuck can still drive the motor). Set this in menuconfig
+            or sdkconfig.defaults.private. Do not commit real credentials.
+
+    config IOTROBOT_WIFI_PASSWORD
+        string "Wi-Fi password"
+        default ""
+        help
+            Leave empty for an open network. When set, the station
+            requires WPA2-PSK or stronger.
+
+    config IOTROBOT_MQTT_URI
+        string "MQTT broker URI"
+        default "mqtt://192.168.1.10:1883"
+        help
+            The broker runs on a separate computer on the LAN. It is not
+            part of this repository. Example: mqtt://192.168.1.10:1883
+            (plaintext TCP, no TLS).
+
+    config IOTROBOT_MQTT_USERNAME
+        string "MQTT username"
+        default ""
+        help
+            Leave empty to connect without a username.
+
+    config IOTROBOT_MQTT_PASSWORD
+        string "MQTT password"
+        default ""
+
+    config IOTROBOT_L298N_ENA_GPIO
+        int "L298N channel A ENA (PWM)"
+        range 0 33
+        default 14
+        help
+            Enable pin. Remove the ENA jumper on the module so this PWM
+            reaches the driver. PR #1 used GPIO14 on the ESP8266 NodeMCU.
+
+    config IOTROBOT_L298N_IN1_GPIO
+        int "L298N channel A IN1"
+        range 0 33
+        default 12
+        help
+            Direction pin. PR #1 used GPIO12. On the ESP32, GPIO12 is a
+            strapping pin: if it is high at reset the flash is powered at
+            1.8 V and the chip will not boot. Keep the L298N input low at
+            reset, or move IN1 (GPIO27 is a safe alternative).
+
+    config IOTROBOT_L298N_IN2_GPIO
+        int "L298N channel A IN2"
+        range 0 33
+        default 13
+        help
+            Direction pin. PR #1 used GPIO13.
+
+    config IOTROBOT_L298N_PWM_HZ
+        int "L298N PWM frequency (Hz)"
+        range 100 20000
+        default 1000
+        help
+            1000 Hz is a safe default for an L298N. Higher frequencies
+            are quieter and heat the driver more.
+
+    config IOTROBOT_NUNCHUCK_ENABLE
+        bool "Read a Wii nunchuck on I2C"
+        default y
+        help
+            When the nunchuck is detected, stick Y drives the motor and
+            Z is a cut. If it is not detected, MQTT motor commands still work.
+
+    config IOTROBOT_NUNCHUCK_SDA_GPIO
+        int "Nunchuck SDA"
+        depends on IOTROBOT_NUNCHUCK_ENABLE
+        range 0 33
+        default 21
+        help
+            ESP32 default I2C SDA. The old ESP8266 sketches used GPIO4.
+            Use 3.3 V and external 4.7 kΩ pull-ups if the bus is long.
+
+    config IOTROBOT_NUNCHUCK_SCL_GPIO
+        int "Nunchuck SCL"
+        depends on IOTROBOT_NUNCHUCK_ENABLE
+        range 0 33
+        default 22
+
+    config IOTROBOT_JOY_CENTER
+        int "Nunchuck Y center count"
+        range 0 255
+        default 128
+        help
+            Rest position of the stick, about 0-255. TODO: confirm on the
+            nunchuck you have. A larger Y is treated as forward.
+
+    config IOTROBOT_JOY_DEADZONE
+        int "Nunchuck dead zone (counts)"
+        range 0 80
+        default 24
+
+endmenu

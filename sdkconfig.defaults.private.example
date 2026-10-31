@@ -1,0 +1,10 @@
+# Copy to sdkconfig.defaults.private and edit. That file is gitignored.
+# Placeholders only. The broker is a separate machine on your LAN.
+# Delete sdkconfig after editing this file so the new values are applied
+# (build.sh and build.ps1 do that when this file is newer than sdkconfig).
+
+CONFIG_IOTROBOT_WIFI_SSID="your-ssid"
+CONFIG_IOTROBOT_WIFI_PASSWORD="your-wifi-passphrase"
+CONFIG_IOTROBOT_MQTT_URI="mqtt://192.168.1.10:1883"
+CONFIG_IOTROBOT_MQTT_USERNAME="mqtt-user"
+CONFIG_IOTROBOT_MQTT_PASSWORD="mqtt-password"

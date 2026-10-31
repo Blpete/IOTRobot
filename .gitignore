@@ -1,17 +1,15 @@
-# Local secrets. Copy include/config.example.h to include/config.h.
-include/config.h
-libraries/IotRobotNet/src/config.h
-libraries/IotRobotNet/src/iotrobot_config.h
+# Local secrets and generated config
+sdkconfig
+sdkconfig.old
+sdkconfig.defaults.private
 
-# Arduino build output
+# ESP-IDF build output
 build/
-*.elf
-*.bin
-*.hex
-*.map
-*.partitions.bin
+managed_components/
+dependencies.lock
+.cache/
 
-# OS / editor junk
+# OS / editor
 .DS_Store
 *.swp
 *~

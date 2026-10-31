@@ -1,0 +1,5 @@
+# Non-secret build defaults. Wi-Fi and MQTT credentials belong in
+# sdkconfig.defaults.private (copy the .example file). Do not commit that file.
+CONFIG_IDF_TARGET="esp32"
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y

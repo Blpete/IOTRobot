@@ -1,10 +1,24 @@
-name: build
-on: [pull_request, push]
+name: esp-idf
+
+on:
+  push:
+  pull_request:
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Compile sketches
-        run: bash ci/build-arduino/buildarduino.sh
+
+      - name: Read pinned ESP-IDF version
+        id: pin
+        run: echo "version=$(tr -d '[:space:]' < idf-version.txt)" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        uses: espressif/esp-idf-ci-action@v1.2.0
+        with:
+          esp_idf_version: ${{ steps.pin.outputs.version }}
+          esp_idf_docker_image: docker.io/espressif/idf
+          target: esp32
+          command: idf.py set-target esp32 build && idf.py size

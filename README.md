@@ -1,225 +1,186 @@
 # IOTRobot
 
-ESP8266 robot firmware, plus standalone sketches for the parts that are not integrated yet. Boards talk to an **MQTT broker that runs on a separate server on the LAN**. That broker is not in this repository. Its address is `MQTT_HOST` in the local config header.
+ESP32 robot firmware: Wi-Fi, MQTT, a Wii nunchuck on I2C, and one L298N motor channel. This is a **native ESP-IDF** application. It does not use the Arduino core or Arduino libraries.
 
-License: [GPL-3.0-or-later](LICENSE). One file is an exception: `ssd1306_interface.ino/` is a modified Adafruit example and stays under the Adafruit BSD license in that folder's `license.txt`.
+The MQTT broker is a **separate server on the LAN**. It is not in this repository. Point `CONFIG_IOTROBOT_MQTT_URI` at that machine.
 
-## Status
+License: [GPL-3.0-or-later](LICENSE).
 
-`iot_robot_main` is the robot. It brings up WiFi, MQTT, OTA, a 16×2 I2C LCD, a PCA9685 servo driver, and one L298N motor channel. Joystick axis Y and the Z button, published by the nunchuck example, drive that motor.
+Passwords that were hardcoded in older revisions are still in **git history**. Rotate the access-point passphrase and the MQTT password. Do not reuse them.
 
-The other sketches are **part examples**. They compile and can be flashed on their own. They are not a second copy of the robot.
+## ESP8266 is not supported
 
-WiFi, MQTT, and OTA passwords are not in the source tree. Copy `include/config.example.h` to `include/config.h` (gitignored) and edit it before you flash a board onto a real network.
+ESP-IDF does not build for the ESP8266. Every sketch in the previous tree except `commsController` was an ESP8266 (NodeMCU) sketch. Those boards cannot run this firmware.
 
-Passwords that used to be hardcoded are still in **git history**. Rotate the access-point passphrase and the MQTT password, and treat the old OTA-less firmware as untrusted. Do not reuse those secrets.
+Use a classic **ESP32** module (ESP32-WROOM-32 class), not an ESP8266, ESP32-S2, S3, or C3. The build target is `esp32`. Flash size is assumed to be **4 MB**.
 
-## Hardware
+`commsController` was already an ESP32 sketch (Heltec WiFi LoRa 32). Its SSD1306 OLED and SX127x LoRa radio are **not ported**. Board revision (V1 / V2 / V3) was never confirmed. Do not flash this image expecting the old LoRa sender.
 
-**TODO/assumption:** ESP8266 sketches target a NodeMCU 1.0 / v2 (ESP-12E). The editor files request `esp8266:esp8266:nodemcuv2`, 80 MHz, 4 MB flash with a 1 MB filesystem, upload 115200. Board revision is unconfirmed.
+## What this firmware does
 
-**TODO/assumption:** `commsController` targets a Heltec WiFi LoRa 32 class board (ESP32 + SX127x + SSD1306). V1, V2, and V3 are not confirmed. The pin numbers in that sketch match the V1 comments. V2 also needs Vext (GPIO21, active low). V3 uses different pins.
+`app_main` starts FreeRTOS tasks and returns. Wi-Fi and MQTT run on the ESP-IDF event loop. They do not block the motor task.
 
-### Parts
+- Station Wi-Fi joins the configured SSID. If the association drops, a timer calls `esp_wifi_connect()` again after 5 seconds.
+- `esp-mqtt` connects to the LAN broker and reconnects on its own. The client id is `robot-` plus the Wi-Fi MAC (`robot-AABBCCDDEEFF`).
+- The nunchuck is read on I2C (address `0x52`) about every 50 ms. Stick Y drives the motor. Z held down forces the motor off.
+- If the nunchuck is missing, MQTT commands on `esp/msg` drive the motor instead.
+- While the stick is inside the dead zone, an MQTT speed command is used. Moving the stick out of the dead zone takes over.
 
-| Part | Sketch | Notes |
+| Topic | Direction | Payload |
 |---|---|---|
-| NodeMCU v2 (ESP8266) | Robot and the ESP8266 examples | **TODO/assumption** for every ESP8266 board. |
-| L298N, one channel | `iot_robot_main`, `motorController` | Channel A only. Motor supply is separate from the NodeMCU 3.3 V pin. |
-| PCA9685 at I2C `0x40` | `iot_robot_main` | Started at 60 Hz. No servo output is commanded yet. |
-| 16×2 I2C LCD | Robot and joystick at `0x3F`; UI example at `0x27` | **TODO/assumption:** confirm which backpack is on which board. |
-| Wii nunchuck | `joystickController` | I2C, `WiiChuck` library. **TODO/assumption:** power it at 3.3 V. |
-| Heltec-style ESP32 + SX127x + SSD1306 `0x3C` | `commsController` | LoRa sender / MQTT forwarder. **TODO:** confirm the RF band before transmitting. The sketch uses 915 MHz. |
-| SSD1306 128×32 | `ssd1306_interface.ino` | Counter demo. Not part of the robot. |
+| `esp/input_x` | publish, when X changes | Decimal 0–255. Not used for steering. |
+| `esp/input_y` | publish, when Y changes | Decimal 0–255. |
+| `esp/button_z` | publish, on edges | `1` pressed, `0` released. |
+| `esp/log` | publish | `online robot-...`, `Z pressed`, `Z released`. |
+| `esp/msg` | subscribe | `motor-stop`, `motor-forward`, `motor-back`, `motor-speed=<percent>` (`-100`..`100`). Other text is logged and ignored. |
 
-There is no RTC in the firmware. An old DS1307 include was a stub and has been removed.
+**TODO:** nunchuck center is 128 and a larger Y means forward. Swap the motor leads if the direction is wrong. Dead zone default is ±24 counts.
 
 ## Wiring
 
-ESP8266 `Wire.begin()` with no arguments uses **SDA = GPIO4 (NodeMCU D2)** and **SCL = GPIO5 (NodeMCU D1)**.
+Common ground between the ESP32, the L298N logic, and the motor supply. Do not power the motor from the ESP32 3.3 V pin. Motor voltage is **TODO**.
 
-### L298N on the robot (and on the motor example)
+### L298N channel A
 
-| L298N | ESP8266 GPIO | NodeMCU | Notes |
-|---|---|---|---|
-| ENA | 14 | D5 | PWM speed. Remove the ENA jumper. |
-| IN1 | 12 | D6 | Direction. |
-| IN2 | 13 | D7 | Direction. |
-| GND | GND | G | Common ground with the motor supply. |
-| OUT1, OUT2 | motor leads | | Swap the leads if forward and back are reversed. |
-| +12 V (motor supply) | external supply | | **TODO:** motor voltage. Do not feed the motor from the NodeMCU 3.3 V pin. |
-| 5 V logic | module jumper or 5 V | | **TODO/assumption:** many L298N boards treat a 3.3 V ESP pin as a valid high. If the motor chatters, use a level shifter. |
+Defaults match the pin numbers from the ESP8266 firmware. Change them with `idf.py menuconfig` under **IOTRobot**.
 
-IN3, IN4, and ENB are not connected. GPIO0, GPIO2, and GPIO4 are not motor pins: GPIO0 and GPIO2 are boot straps, and GPIO4 is I2C SDA.
+| L298N | Default GPIO | Notes |
+|---|---|---|
+| ENA | 14 | 10-bit PWM, default 1 kHz. Remove the ENA jumper. |
+| IN1 | 12 | Direction. |
+| IN2 | 13 | Direction. |
+| GND | GND | Common ground. |
+| OUT1, OUT2 | motor | Swap the leads to reverse forward. |
+| Motor supply | external | Not the ESP32 3.3 V pin. |
+| Logic 5 V | module jumper | **TODO:** many boards accept 3.3 V as a high. If the motor chatters, use a level shifter. |
 
-Do not run `iot_robot_main` and `motorController` against the same L298N. Both use this pin map.
+**GPIO12 is an ESP32 strapping pin.** If it is high at reset, the flash is powered at 1.8 V and the chip will not boot. The firmware drives IN1 low after boot, but the L298N must not hold GPIO12 high while the ESP32 is resetting. If the board never boots, set IN1 to GPIO27 (or another non-strapping pin) in menuconfig. GPIO0, GPIO2, and GPIO15 are also poor choices.
 
-### I2C on the robot
+IN3, IN4, and ENB are not used.
 
-| Device | Address |
+### Nunchuck
+
+| Signal | Default GPIO |
 |---|---|
-| PCA9685 | `0x40` |
-| 16×2 LCD | `0x3F` |
+| SDA | 21 |
+| SCL | 22 |
+| VCC | 3.3 V |
+| GND | GND |
 
-Pulse counts `150` and `600` (of 4096) are defined for later servo use and are not applied yet.
+The old ESP8266 sketches used GPIO4 and GPIO5. Those are not the defaults here. Address `0x52`, 100 kHz. Internal pull-ups are enabled; add external 4.7 kΩ pull-ups if the cable is long. The init sequence (`0xF0=0x55`, `0xFB=0x00`) turns encryption off.
 
-### Nunchuck example
+## What was not ported
 
-SDA GPIO4, SCL GPIO5, LCD at `0x3F` if that example's display is fitted. The nunchuck address is the one the `WiiChuck` library uses (typically `0x52`).
+The old Arduino sketches are removed. They were separate part experiments, not a second robot.
 
-### UI example
+| Old sketch | Board | Fate |
+|---|---|---|
+| `iot_robot_main` | ESP8266 | Replaced by this ESP-IDF app. LCD, PCA9685 servo driver, OTA, and EEPROM config were not ported. |
+| `joystickController` | ESP8266 | The nunchuck is on this ESP32's I2C bus. There is no second board publishing joystick topics. |
+| `motorController` | ESP8266 | The L298N driver is in this app. |
+| `uiController` | ESP8266 | Dropped. No LCD. |
+| `commsController` | ESP32 Heltec | Dropped. No SSD1306 and no LoRa. |
+| `ssd1306_interface.ino` | ESP8266 | Removed. It was a modified Adafruit demo. No Adafruit-derived source remains in this tree. |
 
-LCD at I2C `0x27`, 16×2. **TODO/assumption:** same default SDA/SCL.
+## Configure secrets
 
-### Comms example
-
-| Function | GPIO |
-|---|---|
-| OLED SDA | 4 |
-| OLED SCL | 15 |
-| OLED RST | 16, held low 50 ms, then high |
-| OLED address | `0x3C` |
-| SX127x SCK | 5 |
-| SX127x MISO | 19 |
-| SX127x MOSI | 27 |
-| SX127x CS | 18 |
-| SX127x RST | 14 |
-| SX127x DIO0 | 26 |
-| Packet LED | 25 |
-
-Radio settings in the sketch: carrier `915E6`, spreading factor 9, bandwidth `31.25E3`, coding rate 4/8, preamble 8. A 434 MHz define is commented out. **TODO:** confirm the module and the legal band. This bandwidth and spreading factor keep the transmitter on for a long time per short packet.
-
-## Configuration
+Copy the example and edit the placeholders. Do not commit the copy.
 
 ```bash
-cp include/config.example.h include/config.h
+cp sdkconfig.defaults.private.example sdkconfig.defaults.private
 ```
 
-Edit `include/config.h`. It is gitignored. The network library reads that file when the sketch is built from this repository. If it does not exist, the build uses the placeholders in `include/config.example.h`. A sketchbook copy of the library cannot see `include/config.h`; put the same contents in `libraries/IotRobotNet/src/iotrobot_config.h` next to the library sources.
+On Windows the same file name is used. `build.sh` / `build.ps1` pass it to ESP-IDF as `SDKCONFIG_DEFAULTS`. If that file is newer than `sdkconfig`, the scripts delete `sdkconfig` so the new values are applied.
 
-| Macro | Meaning |
-|---|---|
-| `WIFI_SSID`, `WIFI_PASSWORD` | Access point. One SSID for every board. |
-| `MQTT_HOST`, `MQTT_PORT` | Broker on the LAN server. Port `1883` is plaintext MQTT. There is no TLS in this firmware. |
-| `MQTT_USER`, `MQTT_PASSWORD` | Broker account. |
-| `OTA_PASSWORD` | ArduinoOTA password. Leave it non-empty. |
-
-Placeholders are not usable secrets. Change them before a board joins a real network. Anyone who can publish to the topics below can move the motor, write the LCD, and write EEPROM. Anyone on the WiFi who knows the OTA password can replace the firmware.
-
-Client ids are `<prefix>-<chipid>`, so two boards no longer share `ESP8266-1`. Prefixes: `robot`, `joy`, `ui`, `motor`, `lora`.
-
-## Build and flash
-
-Dependencies (Library Manager names, also installed by the CI script):
-
-| Library | Sketches |
-|---|---|
-| PubSubClient | All networked sketches, via `IotRobotNet` |
-| LiquidCrystal I2C (needs `init()`, `begin()`, `backlight()`) | Robot, joystick, UI |
-| Adafruit PWM Servo Driver Library | Robot |
-| WiiChuck | Joystick |
-| LoRa by Sandeep Mistry | Comms |
-| ESP8266 and ESP32 OLED driver for SSD1306 displays (`SSD1306.h`) | Comms |
-| Adafruit GFX Library, Adafruit SSD1306 | OLED counter example |
-
-Cores used by CI: ESP8266 3.1.2 and ESP32 2.0.17. **TODO/assumption:** the original editor paths named core 2.4.2. These sketches were built here against 3.1.2 and ESP32 2.0.17. On 3.1.2 the robot sketch uses about 95% of instruction RAM, so more code in that sketch can fail to link.
-
-The LiquidCrystal I2C library CI installs (1.1.2, the YWROBOT port) is tagged as AVR in its metadata and prints a warning. It still provides `init()`, `begin()`, and `backlight()`, and the ESP8266 sketches build with it. ESP32 linking needs Python `pyserial` for that core's esptool; the build script installs it.
-
-Compile everything:
+You can also change the same settings with menuconfig (the **IOTRobot** menu):
 
 ```bash
-bash ci/build-arduino/buildarduino.sh
+./build.sh idf.py menuconfig
 ```
 
-One sketch:
+```powershell
+.\build.ps1 idf.py menuconfig
+```
+
+`sdkconfig` is gitignored. A build with no private file and an empty SSID still compiles. The chip then runs the motor task and skips Wi-Fi.
+
+## Build on Windows (Podman Desktop)
+
+ESP-IDF is pinned in `idf-version.txt` (currently v5.3.2). The image is `docker.io/espressif/idf:<that version>`.
+
+1. Install [Podman Desktop](https://podman-desktop.io/) and start the machine. Docker works too; the script uses `podman` if it is on `PATH`, otherwise `docker`.
+2. Open PowerShell in this folder.
+3. Copy and edit `sdkconfig.defaults.private` (above).
+4. Build:
+
+```powershell
+.\build.ps1
+```
+
+That runs:
+
+```text
+podman run --rm -v <repo>:/project -w /project docker.io/espressif/idf:v5.3.2 idf.py set-target esp32 build
+```
+
+The first run downloads the image (several GB). Override the image with the `IDF_IMAGE` environment variable if you need to.
+
+A debug build with ESP-IDF v5.3.2 (`idf.py size`) is:
+
+| Region | Used | Of |
+|---|---:|---:|
+| App image | 525,516 bytes | 1,048,576-byte factory app partition (about 50% free; the flashed `.bin` is 525,632 bytes) |
+| IRAM | 58,519 bytes (45%) | 131,072 |
+| DRAM | 15,548 bytes (8.6%) | 180,736 (`.data` 9,588, `.bss` 5,960) |
+
+Linux and macOS:
 
 ```bash
-arduino-cli compile --libraries "$PWD/libraries" \
-  --fqbn esp8266:esp8266:nodemcuv2 \
-  iot_robot_main
-arduino-cli upload -p /dev/ttyUSB0 \
-  --fqbn esp8266:esp8266:nodemcuv2 \
-  iot_robot_main
+./build.sh
 ```
 
-| Sketch | FQBN |
-|---|---|
-| `iot_robot_main`, `joystickController`, `uiController`, `motorController`, `ssd1306_interface.ino` | `esp8266:esp8266:nodemcuv2` |
-| `commsController` | `esp32:esp32:esp32` |
+## Flash and monitor from Windows
 
-**TODO/assumption:** a generic ESP32 FQBN is enough to compile the comms sketch. Pick the Heltec board entry that matches the silk screen before you flash it. The committed serial port `/dev/ttyS0` in `.vscode/` is a placeholder; use the real device (`/dev/ttyUSB0` or `/dev/ttyACM0`).
+The container build does not see your serial port. Flash from the host. Install esptool once:
 
-Serial monitor: **115200**, except the OLED counter example, which uses **9600**.
+```powershell
+py -m pip install esptool
+```
 
-Arduino IDE does not see `libraries/IotRobotNet` unless that folder is on the library path. Either compile with the command above, or copy `libraries/IotRobotNet` into the sketchbook `libraries` folder and copy `include/config.h` to `libraries/IotRobotNet/src/iotrobot_config.h` inside that copy.
+`build/flash_args` paths are relative to `build/`. From that directory, replace `COM5` with the port shown in Device Manager:
 
-OTA runs only after WiFi connects, and only with `OTA_PASSWORD`. A failed access point no longer blocks `setup()` forever: WiFi is attempted for 15 seconds, MQTT for a few tries, then `loop()` keeps retrying every 10 seconds.
+```powershell
+cd build
+py -m esptool --chip esp32 --port COM5 --baud 460800 write_flash "@flash_args"
+```
 
-## Usage
+Serial log is 115200. esptool installs pyserial, so:
 
-Power the LAN broker, then the boards.
+```powershell
+py -m serial.tools.miniterm COM5 115200
+```
 
-### Topics
+Leave miniterm with `Ctrl+]`.
 
-| Topic | Who publishes | Who subscribes | Payload |
-|---|---|---|---|
-| `esp/input_x` | Joystick, when X changes | nobody yet | Decimal axis, about 0–255. |
-| `esp/input_y` | Joystick, when Y changes | Robot | Decimal axis. Center is treated as 128. |
-| `esp/button_z` | Joystick, on Z edges | Robot | `1` pressed, `0` released. Held Z forces the motor off. |
-| `esp/msg` | anyone | Robot, joystick, UI, comms | Commands below. The UI prints the text. Comms forwards it over LoRa. |
-| `esp/log` | Each networked sketch | nobody | Log lines. Joystick logs no longer go to `esp/msg`. |
-| `esp/test` | Comms | nobody | `Sending packet` or `forwarded`. |
-| `esp/motor-example` | anyone | Motor example only | `forward`, `back`, `stop`, `speed=<percent>`. |
+Nothing in this port has been flashed to a board. Wi-Fi, MQTT, the nunchuck, and the L298N are untested on hardware.
 
-**TODO/assumption:** nunchuck center is 128 and a larger Y means forward. Dead zone is ±24 counts. If the robot runs backward, swap the motor leads. Z held down is a cut, not a throttle.
-
-### Commands on `esp/msg` (robot)
-
-| Payload | Effect |
-|---|---|
-| `lcd-on` / `lcd-off` | Backlight. |
-| `lcd-write0=<text>` / `lcd-write1=<text>` | Text at column 0 of that row. Rows are 0 and 1. |
-| `lcd-clear` | Clear. |
-| `pin1-on` / `pin1-off` | `LED_BUILTIN`, active low. This is not a motor pin. |
-| `i2c-scan` | Scan I2C addresses 1–126. |
-| `wifi-scan` | Print nearby SSIDs on serial. |
-| `write-config=<text>` / `read-config` | EEPROM text, at most 253 bytes. |
-| `motor-forward` / `motor-back` / `motor-stop` | L298N channel A. |
-| `motor-speed=<percent>` | Percent from -100 to 100. |
-| anything else | Printed on the LCD. |
-
-`esp/input_x` is published for a later steering channel and is not used.
-
-## What is integrated
-
-- Robot: WiFi, MQTT, OTA, LCD at `0x3F`, PCA9685 `begin()`, L298N from joystick Y and from the motor commands.
-- Joystick example publishes the nunchuck. The robot consumes Y and Z.
-- UI example shows `esp/msg` on its own LCD.
-- Motor example is a bench sketch on `esp/motor-example`.
-- Comms example sends a LoRa counter every 2 seconds and forwards `esp/msg` out LoRa. It does not receive LoRa. If the radio fails to start, WiFi and MQTT keep running.
-- OLED counter example scrolls a number and saves it to flash every 20 ticks.
-
-## Project structure
+## Project layout
 
 ```
-.
-├── LICENSE                         GPL-3.0
-├── include/config.example.h        committed placeholders
-├── include/config.h                gitignored, you create this
-├── libraries/IotRobotNet/          WiFi, MQTT, OTA
-├── iot_robot_main/                 robot sketch
-├── joystickController/             nunchuck example
-├── uiController/                   LCD example
-├── motorController/                L298N bench example
-├── commsController/                LoRa sender example
-├── ssd1306_interface.ino/          Adafruit OLED example (BSD)
-├── ci/build-arduino/buildarduino.sh
-└── .github/workflows/build.yml
+CMakeLists.txt
+idf-version.txt
+sdkconfig.defaults
+sdkconfig.defaults.private.example
+main/                 application (Wi-Fi, MQTT, nunchuck, L298N)
+build.sh
+build.ps1
+.github/workflows/build.yml
 ```
+
+Wi-Fi, MQTT, I2C, GPIO, and LEDC come from ESP-IDF. There is no `components/` directory and no Arduino component.
 
 ## License
 
-Source files carry `SPDX-License-Identifier: GPL-3.0-or-later` and copyright Barry Peterson, except the OLED counter sketch.
+Source files are `SPDX-License-Identifier: GPL-3.0-or-later`, copyright Barry Peterson.
 
-`ssd1306_interface.ino/ssd1306_interface.ino.ino` is derived from Adafruit's SSD1306 128×32 I2C example, written by Limor Fried / Ladyada. That folder's `license.txt` is Adafruit's BSD license. Keep that notice with the file. The rest of this repository is GPL-3.0-or-later and is not an Adafruit product.
+The previous `ssd1306_interface.ino` tree was a modified Adafruit SSD1306 example under Adafruit's BSD license. That example was removed rather than rewritten. No Adafruit-derived code is in this tree.
